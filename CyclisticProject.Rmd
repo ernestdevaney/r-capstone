@@ -1,0 +1,229 @@
+---
+title: "Cyclistic Cleanup and Processing"
+author: "Ernest Devaney"
+Date: January 2023
+output:
+  html_document:
+    theme: spacelab
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+
+# 1. Document description
+
+This document outlines the steps taken to clean and transform twelve months of datasets provided by Cyclistic [here](https://divvy-tripdata.s3.amazonaws.com/index.html). Cyclistic is a fictional company. The data has been collected and provided by Divvy, the public license for which can be found [here](https://www.divvybikes.com/data-license-agreement).
+
+
+Installing/loading required packages
+
+
+```{r load packages}
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(data.table)
+
+```
+
+
+# 2. Combining datasets
+
+Combining datasets, range Oct 2021 to Sept 2022.
+
+### 2.1 Load the raw data
+
+
+```{r load individual datasets}
+
+#There are twelve month's worth of data that we are looking at
+
+oct_21 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202110-divvy-tripdata.csv")
+nov_21 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202111-divvy-tripdata.csv")
+dec_21 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202112-divvy-tripdata.csv")
+jan_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202201-divvy-tripdata.csv")
+feb_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202202-divvy-tripdata.csv")
+mar_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202203-divvy-tripdata.csv")
+apr_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202204-divvy-tripdata.csv")
+may_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202205-divvy-tripdata.csv")
+jun_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202206-divvy-tripdata.csv")
+jul_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202207-divvy-tripdata.csv")
+aug_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202208-divvy-tripdata.csv")
+sep_22 <- read.csv("~/Desktop/Google DA Course/CAPSTONE/202209-divvy-publictripdata.csv")
+
+```
+
+
+### 2.2 Checking data structure
+
+
+```{r checking column names and string types to ensure consistency}
+
+str(oct_21)
+str(nov_21)
+str(dec_21)
+str(jan_22)
+str(feb_22)
+str(mar_22)
+str(apr_22)
+str(may_22)
+str(jun_22)
+str(jul_22)
+str(aug_22)
+str(sep_22)
+
+
+
+```
+
+
+Variable names and string types appear consistent.
+
+
+### 2.3 Merge datasets
+
+
+```{r combining the twelve individual datasets into one}
+
+all_trips <- rbind(
+  oct_21, nov_21, dec_21, jan_22, feb_22, mar_22, apr_22, may_22, jun_22, jul_22, aug_22, sep_22
+)
+
+glimpse(all_trips) #Just a quick check in! Isn't she a beaut?
+
+```
+
+
+### 2.4 Basic exploration
+
+Checking for duplicates in the ride_id column.
+
+
+```{r}
+
+sum(duplicated(all_trips$ride_id))
+
+```
+
+
+No duplicates.
+
+### 2.5 Transforming date information
+
+I want to formalize the date format and split the information into individual variables (year, month, day) as this will aid in analysis later. I also want to add a trip_duration column. 
+
+
+```{r manipulating time-related data}
+
+all_trips$date <- as.Date(all_trips$started_at) #The default format is yyyy-mm-dd
+all_trips$month <- format(as.Date(all_trips$date), "%m")
+all_trips$day <- format(as.Date(all_trips$date), "%d")
+all_trips$year <- format(as.Date(all_trips$date), "%Y")
+all_trips$day_of_week <- format(as.Date(all_trips$date), "%A")
+
+#Adding variable for ride length in seconds
+all_trips$ride_length <- difftime(all_trips$ended_at,all_trips$started_at)
+
+#Checking the types for the new columns
+str(all_trips)
+
+#Converting ride_length from a character type to numeric
+
+all_trips$ride_length <- as.numeric(all_trips$ride_length)
+
+```
+
+
+# 3 Cleaning dataset
+
+### 3.1 Removing blank stations and short trips
+
+I want to filter out all trips with blank station names, as well as any trips with a duration lasting less than two minutes, as these are most likely errors/mistakes. 
+
+
+```{r clean data}
+
+all_trips_cleaned <- all_trips %>%
+  
+#Filtering out rows with blank station names
+  filter(
+      !(is.na(start_station_name) |
+          start_station_name == "")
+      ) %>% 
+  
+  filter(
+    !(is.na(end_station_name) |
+        end_station_name == "")
+    ) %>%
+  
+#Filtering out trips under two minutes, as they are likely errors
+  filter(
+    !(ride_length < 120)
+    )
+
+
+```
+
+
+### 3.2 Removing docked bikes
+
+While looking at ride lengths I spotted "docked bikes" in the rideable_type column. At first I assumed that docked bikes would be just that -- bikes that had been returned or were otherwise not in use. However, many had different start and stop locations, meaning they had traveled while docked. I cannot verify this, but I believe this can be explained by bikes being moved from less active stations to more active stations. As such I'm removing all data involving docked bikes.
+
+
+```{r removing docked bikes and creating a new version of the dataset}
+
+all_trips_cleaned_v2 = filter(all_trips_cleaned, rideable_type != "docked_bike")
+
+```
+
+
+# 4 Exploration
+
+I'm going to do most of my exploration and visualizations for this project using Tableau, but I wanted to check an assumption first. I assumed that casual customers would be more active on weekends (for recreation), while monthly subscribers would be more active during the work week (for their work commute). 
+
+
+```{r}
+
+
+  day_of_week_per_rider <- all_trips_cleaned_v2 %>%
+  select(member_casual, day_of_week) %>%
+  count(member_casual, day_of_week)
+
+ggplot(day_of_week_per_rider, aes(x=day_of_week, y=n, fill=member_casual)) +
+  geom_col(position = "dodge") +
+  theme(axis.text.x=element_text(angle = 45, hjust=1)) +
+  scale_x_discrete(limits = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" ))
+  labs(title = "Total usage per day per rider type")
+
+  
+
+```
+
+
+My assumption was correct, but the drop off for members over the weekends is less that I'd imagined it would be. 
+
+# 5. Exporting data
+
+
+```{r Exporting for further analysis in Tableau}
+
+#Exporting cleaned dataset
+
+fwrite(
+  all_trips_cleaned_v2,
+  "~/Desktop/Google DA Course/CAPSTONE/all_trips_cleaned_v2.csv",
+  col.names = TRUE,
+  row.names = FALSE,
+  sep = ","
+  )
+  
+
+```
+
+
+
+
+
+
